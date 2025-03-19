@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>甲骨图像匹配系统</title>
+    <style>
+        body {
+            display: flex;
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+
+        #left-panel {
+            width: 60%;
+            padding-right: 20px;
+        }
+
+        #right-panel {
+            width: 40%;
+            border-left: 2px solid #ccc;
+            padding-left: 20px;
+        }
+
+        .canvas {
+            border: 2px dashed #999;
+            background: #f5f5f5;
+            margin-top: 20px;
+            overflow: auto;
+            position: relative;
+        }
+
+        .image-container {
+            display: inline-block;
+            margin: 5px;
+            cursor: move;
+        }
+
+        .query-image, .result-image {
+            width: 150px;
+            height: 150px;
+            object-fit: contain;
+            border: 1px solid #ddd;
+            transition: transform 0.2s ease;
+        }
+
+        button {
+            padding: 8px 16px;
+            margin: 5px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        #loading {
+            display: none;
+            color: #666;
+            margin-left: 10px;
+        }
+
+        .controls {
+            margin-top: 10px;
+        }
+
+        #query-display, #results {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        #query-display .image-container, #results .image-container {
+            position: relative;
+            display: inline-block;
+        }
+
+        #query-display img, #results img {
+            width: 150px;
+            height: 150px;
+            object-fit: contain;
+            border: 1px solid #ddd;
+        }
+    </style>
+</head>
+<body>
+    <div id="left-panel">
+        <button onclick="document.getElementById('query-input').click()">加载查询图</button>
+        <button onclick="document.getElementById('dataset-input').click()">加载图像库</button>
+        <button onclick="performMatching()">相似性匹配</button>
+        <span id="loading">匹配中...</span>
+        
+        <input type="file" id="query-input" hidden accept="image/*">
+        <input type="file" id="dataset-input" hidden accept="image/*" webkitdirectory multiple>
+        
+        <h3>查询图:</h3>
+        <div id="query-display"></div>
+        
+        <h3>匹配结果 (Top10):</h3>
+        <div id="results"></div>
+    </div>
+
+    <div id="right-panel">
+        <h3>组合画板 (可拖动图像):</h3>
+        <div class="controls">
+            <button onclick="scaleSelectedImage(1.1)">放大</button>
+            <button onclick="scaleSelectedImage(0.9)">缩小</button>
+            <button onclick="rotateSelectedImage(90)">旋转 90°</button>
+        </div>
+        <div id="canvas" class="canvas"></div>
+    </div>
+
+    <script>
+        let queryImage = null;
+        let datasetImages = [];
+        const imageSize = { width: 150, height: 150 }; // 统一图像大小
+        let selectedImage = null; // 当前选中的图像
+
+        // 图像加载处理
+        document.getElementById('query-input').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            displayImage(file, document.getElementById('query-display'), true);
+        });
+
+        document.getElementById('dataset-input').addEventListener('change', function(e) {
+            datasetImages = Array.from(e.target.files);
+        });
+
+        // 显示图像
+        function displayImage(file, container, isQuery = false) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const img = new Image();
+                img.src = e.target.result;
+                img.onload = function() {
+                    const wrapper = document.createElement('div');
+                    wrapper.className = 'image-container';
+                    wrapper.draggable = true;
+                    
+                    const clone = img.cloneNode();
+                    clone.className = isQuery ? 'query-image' : 'result-image';
+                    clone.style.width = `${imageSize.width}px`;
+                    clone.style.height = `${imageSize.height}px`;
+                    wrapper.appendChild(clone);
+
+                    wrapper.addEventListener('dragstart', (e) => handleDragStart(e, img));
+                    container.innerHTML = '';
+                    container.appendChild(wrapper);
+
+                    if (isQuery) {
+                        queryImage = img;
+                        updateCanvasSize(imageSize.width * 2, imageSize.height * 2);
+                    }
+                };
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // 更新画板尺寸
+        function updateCanvasSize(baseWidth, baseHeight) {
+            const canvas = document.getElementById('canvas');
+            canvas.style.width = `${baseWidth * 2}px`;
+            canvas.style.height = `${baseHeight * 2}px`;
+        }
+
+        // 拖放功能
+        function handleDragStart(e, img) {
+            e.dataTransfer.setData('text/plain', img.src);
+        }
+
+        document.getElementById('canvas').addEventListener('dragover', e => e.preventDefault());
+        document.getElementById('canvas').addEventListener('drop', e => {
+            e.preventDefault();
+            const src = e.dataTransfer.getData('text/plain');
+            const img = new Image();
+            img.src = src;
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, img.width, img.height);
+
+                // 抠图处理（示例：简单裁剪）
+                const imageData = ctx.getImageData(0, 0, img.width, img.height);
+                const data = imageData.data;
+                for (let i = 0; i < data.length; i += 4) {
+                    const r = data[i];
+                    const g = data[i + 1];
+                    const b = data[i + 2];
+                    if (r > 200 && g > 200 && b > 200) { // 简单抠图条件
+                        data[i + 3] = 0; // 设置透明度
+                    }
+                }
+                ctx.putImageData(imageData, 0, 0);
+
+                const croppedImg = new Image();
+                croppedImg.src = canvas.toDataURL();
+                croppedImg.style.position = 'absolute';
+                croppedImg.style.left = `${e.offsetX - imageSize.width / 2}px`;
+                croppedImg.style.top = `${e.offsetY - imageSize.height / 2}px`;
+                croppedImg.style.width = `${imageSize.width}px`;
+                croppedImg.style.height = `${imageSize.height}px`;
+                croppedImg.draggable = true;
+                croppedImg.addEventListener('dragstart', (e) => handleDragStart(e, croppedImg));
+
+                // 添加点击选中功能
+                croppedImg.addEventListener('click', (event) => {
+                    event.stopPropagation(); // 阻止事件冒泡
+                    selectImage(croppedImg);
+                });
+
+                // 添加点击删除功能
+                croppedImg.addEventListener('dblclick', () => {
+                    croppedImg.remove();
+                    selectedImage = null;
+                });
+
+                document.getElementById('canvas').appendChild(croppedImg);
+            };
+        });
+
+        // 选中图像
+        function selectImage(img) {
+            if (selectedImage) {
+                selectedImage.style.border = '1px solid #ddd'; // 取消之前选中的边框
+            }
+            selectedImage = img;
+            selectedImage.style.border = '2px solid blue'; // 添加选中边框
+        }
+
+        // 放大/缩小图像
+        function scaleSelectedImage(scaleFactor) {
+            if (selectedImage) {
+                const currentWidth = parseFloat(selectedImage.style.width);
+                const currentHeight = parseFloat(selectedImage.style.height);
+                selectedImage.style.width = `${currentWidth * scaleFactor}px`;
+                selectedImage.style.height = `${currentHeight * scaleFactor}px`;
+            }
+        }
+
+        // 旋转图像
+        function rotateSelectedImage(degrees) {
+            if (selectedImage) {
+                const currentRotation = selectedImage.style.transform
+                    ? parseFloat(selectedImage.style.transform.replace('rotate(', '').replace('deg)', ''))
+                    : 0;
+                const newRotation = currentRotation + degrees;
+                selectedImage.style.transform = `rotate(${newRotation}deg)`;
+            }
+        }
+
+        // 模拟相似性匹配
+        async function performMatching() {
+            if (!queryImage || datasetImages.length === 0) return;
+            
+            document.getElementById('loading').style.display = 'inline';
+            await new Promise(resolve => setTimeout(resolve, 500)); // 模拟处理时间
+            
+            const resultsContainer = document.getElementById('results');
+            resultsContainer.innerHTML = '';
+            
+            // 模拟排序（实际应替换为真实匹配算法）
+            datasetImages.slice(0, 10).forEach(file => {
+                const reader = new FileReader();
+                reader.onload = e => {
+                    const wrapper = document.createElement('div');
+                    wrapper.className = 'image-container';
+                    wrapper.draggable = true;
+                    
+                    const img = new Image();
+                    img.src = e.target.result;
+                    img.className = 'result-image';
+                    img.style.width = `${imageSize.width}px`;
+                    img.style.height = `${imageSize.height}px`;
+                    wrapper.appendChild(img);
+                    
+                    wrapper.addEventListener('dragstart', (e) => handleDragStart(e, img));
+                    resultsContainer.appendChild(wrapper);
+                };
+                reader.readAsDataURL(file);
+            });
+            
+            document.getElementById('loading').style.display = 'none';
+        }
+
+        // 点击画板空白处取消选中
+        document.getElementById('canvas').addEventListener('click', (e) => {
+            if (e.target === document.getElementById('canvas')) {
+                if (selectedImage) {
+                    selectedImage.style.border = '1px solid #ddd';
+                    selectedImage = null;
+                }
+            }
+        });
+    </script>
+</body>
+</html>
