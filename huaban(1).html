@@ -253,35 +253,59 @@
         // 模拟相似性匹配
         async function performMatching() {
             if (!queryImage || datasetImages.length === 0) return;
-            
+
             document.getElementById('loading').style.display = 'inline';
-            await new Promise(resolve => setTimeout(resolve, 500)); // 模拟处理时间
-            
-            const resultsContainer = document.getElementById('results');
-            resultsContainer.innerHTML = '';
-            
-            // 模拟排序（实际应替换为真实匹配算法）
-            datasetImages.slice(0, 10).forEach(file => {
-                const reader = new FileReader();
-                reader.onload = e => {
-                    const wrapper = document.createElement('div');
-                    wrapper.className = 'image-container';
-                    wrapper.draggable = true;
-                    
-                    const img = new Image();
-                    img.src = e.target.result;
-                    img.className = 'result-image';
-                    img.style.width = `${imageSize.width}px`;
-                    img.style.height = `${imageSize.height}px`;
-                    wrapper.appendChild(img);
-                    
-                    wrapper.addEventListener('dragstart', (e) => handleDragStart(e, img));
-                    resultsContainer.appendChild(wrapper);
-                };
-                reader.readAsDataURL(file);
-            });
-            
-            document.getElementById('loading').style.display = 'none';
+
+            try {
+                const formData = new FormData();
+                formData.append('base_image', document.getElementById('query-input').files[0]);
+                datasetImages.forEach((file) => {
+                    formData.append('comparison_images', file);
+                });
+
+                const response = await fetch('http://127.0.0.1:5000/match', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) throw new Error(`HTTP错误 ${response.status}`);
+                const result = await response.json();
+
+                // 显示结果
+                const resultsContainer = document.getElementById('results');
+                resultsContainer.innerHTML = '';
+                result.matches.forEach((match) => {
+                    const file = datasetImages.find(f => f.name === match.image);
+                    if (!file) return;
+
+                    const reader = new FileReader();
+                    reader.onload = e => {
+                        const wrapper = document.createElement('div');
+                        wrapper.className = 'image-container';
+
+                        const img = new Image();
+                        img.src = e.target.result;
+                        img.className = 'result-image';
+                        img.style.width = `${imageSize.width}px`;
+                        img.style.height = `${imageSize.height}px`;
+
+                        const label = document.createElement('div');
+                        label.textContent = `相似度: ${match.score.toFixed(3)}`;
+                        label.style.fontSize = '12px';
+                        label.style.textAlign = 'center';
+
+                        wrapper.appendChild(img);
+                        wrapper.appendChild(label);
+                        resultsContainer.appendChild(wrapper);
+                    };
+                    reader.readAsDataURL(file);
+                });
+            } catch (error) {
+                console.error('匹配失败:', error);
+                alert(`匹配失败: ${error.message}`);
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+            }
         }
 
         // 点击画板空白处取消选中
